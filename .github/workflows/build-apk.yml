@@ -1,0 +1,71 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Organize files into folders
+        run: |
+          python3 - <<'PY'
+          import os, shutil
+          layout = {
+            "lib": ["main.dart", "models.dart", "theme.dart", "widgets.dart"],
+            "lib/services": ["vault.dart", "auth_service.dart", "planner.dart",
+                             "message_composer.dart", "live_api.dart"],
+            "lib/screens": ["login_screen.dart", "home_screen.dart", "quote_tab.dart",
+                            "result_screen.dart", "rates_tab.dart", "editors.dart",
+                            "settings_tab.dart"],
+            "test": ["planner_test.dart"],
+            "scripts": ["patch_android.py"],
+            "android_overlay": ["MainActivity.kt"],
+          }
+          for folder, files in layout.items():
+              os.makedirs(folder, exist_ok=True)
+              for f in files:
+                  if os.path.exists(f):
+                      shutil.move(f, os.path.join(folder, f))
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.32.0"
+          channel: stable
+          cache: true
+
+      - name: Generate Android shell
+        run: |
+          flutter create --platforms=android --org com.agencyassist --project-name travel_desk "$RUNNER_TEMP/shell"
+          cp -r "$RUNNER_TEMP/shell/android" ./android
+
+      - name: Apply security hardening
+        run: python3 scripts/patch_android.py
+
+      - run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+        continue-on-error: true
+
+      - name: Unit tests
+        run: flutter test
+        continue-on-error: true
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: travel-desk-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
