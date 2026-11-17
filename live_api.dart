@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
+import '../models.dart';
+
 /// Optional online extras. Every call is read-only, uses HTTPS, sends no
 /// credentials or client details, and fails quietly to null when offline.
 class LiveApi {
@@ -78,5 +80,60 @@ class LiveApi {
     } catch (_) {
       return null;
     }
+  }
+}
+
+/// Builds search links that open in the phone's browser. Only city names,
+/// dates and traveller counts are placed in a link. Never client names,
+/// agency details, rates or login data.
+class LiveLinks {
+  static String _clean(String s) => s.replaceAll(RegExp(r'\(.*?\)'), '').trim();
+  static String _d(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
+
+  static Uri transport({
+    required TravelMode mode,
+    required String from,
+    required String to,
+    required DateTime start,
+    required DateTime end,
+    required bool roundTrip,
+  }) {
+    final f = _clean(from);
+    final t = _clean(to);
+    switch (mode) {
+      case TravelMode.flight:
+        final q = roundTrip
+            ? 'Flights from $f to $t on ${_d(start)} returning ${_d(end)}'
+            : 'Flights from $f to $t on ${_d(start)}';
+        return Uri.https('www.google.com', '/travel/flights', {'q': q});
+      case TravelMode.road:
+        return Uri.https('www.google.com', '/maps/dir/', {
+          'api': '1',
+          'origin': f,
+          'destination': t,
+          'travelmode': 'driving',
+        });
+      case TravelMode.ship:
+        return Uri.https('www.google.com', '/search',
+            {'q': 'ship or ferry from $f to $t ticket price'});
+    }
+  }
+
+  static Uri hotel({
+    required String place,
+    required DateTime start,
+    required DateTime end,
+    required int adults,
+    required int children,
+    required int rooms,
+  }) {
+    return Uri.https('www.booking.com', '/searchresults.html', {
+      'ss': _clean(place),
+      'checkin': _d(start),
+      'checkout': _d(end),
+      'group_adults': '$adults',
+      'group_children': '$children',
+      'no_rooms': '$rooms',
+    });
   }
 }

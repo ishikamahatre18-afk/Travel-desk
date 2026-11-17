@@ -137,7 +137,8 @@ class _RatesTabState extends State<RatesTab> {
                         ? Icons.directions_boat
                         : Icons.directions_bus),
                 title: Text('${t.from} → ${_store.destById(t.destinationId)?.name ?? "?"}'),
-                subtitle: Text('${t.mode.label} · ₹${t.pricePerPerson.round()} per person, one way'),
+                subtitle: Text('${t.mode.label} · ₹${t.pricePerPerson.round()} per person, one way'
+                    '${t.updatedAt > 0 ? " · updated ${_ago(t.updatedAt)}" : ""}'),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => TransportEditor(existing: t))),
                 trailing: IconButton(
@@ -154,6 +155,11 @@ class _RatesTabState extends State<RatesTab> {
           ),
       ],
     );
+  }
+
+  static String _ago(int ms) {
+    final d = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms)).inDays;
+    return d <= 0 ? 'today' : '$d d ago';
   }
 
   Widget _header(String title, VoidCallback onAdd) => Padding(

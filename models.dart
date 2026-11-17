@@ -92,6 +92,7 @@ class Destination {
   List<String> highlights;
   List<int> peakMonths; // 1..12
   double peakSurchargePct; // applied to hotel on peak nights
+  int hotelUpdatedAt; // epoch ms, 0 = unknown
 
   Destination({
     required this.id,
@@ -107,6 +108,7 @@ class Destination {
     List<String>? highlights,
     List<int>? peakMonths,
     this.peakSurchargePct = 0,
+    this.hotelUpdatedAt = 0,
   })  : highlights = highlights ?? [],
         peakMonths = peakMonths ?? [];
 
@@ -135,6 +137,7 @@ class Destination {
         'highlights': highlights,
         'peakMonths': peakMonths,
         'peakSurchargePct': peakSurchargePct,
+        'hotelUpdatedAt': hotelUpdatedAt,
       };
 
   factory Destination.fromJson(Map<String, dynamic> j) => Destination(
@@ -155,6 +158,7 @@ class Destination {
                 .toList() ??
             [],
         peakSurchargePct: _d(j['peakSurchargePct'], 0),
+        hotelUpdatedAt: _i(j['hotelUpdatedAt'], 0),
       );
 }
 
@@ -166,6 +170,7 @@ class TransportRate {
   double pricePerPerson; // one way
   double hours; // one way, 0 = unknown
   String notes;
+  int updatedAt; // epoch ms when the price was last confirmed, 0 = unknown
 
   TransportRate({
     required this.id,
@@ -175,6 +180,7 @@ class TransportRate {
     required this.pricePerPerson,
     this.hours = 0,
     this.notes = '',
+    this.updatedAt = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -185,6 +191,7 @@ class TransportRate {
         'pricePerPerson': pricePerPerson,
         'hours': hours,
         'notes': notes,
+        'updatedAt': updatedAt,
       };
 
   factory TransportRate.fromJson(Map<String, dynamic> j) => TransportRate(
@@ -198,6 +205,7 @@ class TransportRate {
         pricePerPerson: _d(j['pricePerPerson'], 0),
         hours: _d(j['hours'], 0),
         notes: _s(j['notes']),
+        updatedAt: _i(j['updatedAt'], 0),
       );
 }
 

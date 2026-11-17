@@ -20,6 +20,8 @@ class QuoteResult {
   final int nights;
   final int rooms;
   final TransportRate? rate;
+  final bool needsRate;
+  final bool needsHotel;
 
   const QuoteResult({
     this.errors = const [],
@@ -34,6 +36,8 @@ class QuoteResult {
     this.nights = 0,
     this.rooms = 0,
     this.rate,
+    this.needsRate = false,
+    this.needsHotel = false,
   });
 
   bool get ok => errors.isEmpty;
@@ -104,8 +108,29 @@ class Planner {
     }
 
     if (errors.isNotEmpty) {
-      return QuoteResult(errors: errors, warnings: warnings, nights: nights);
+      return QuoteResult(
+        errors: errors,
+        warnings: warnings,
+        nights: nights,
+        needsRate: rate == null || rate.pricePerPerson <= 0,
+        needsHotel: hotelRate <= 0,
+      );
     }
+
+    void stale(String what, int ts, int limitDays) {
+      if (ts == 0) {
+        warnings.add('$what price has no saved date. Confirm it is current.');
+        return;
+      }
+      final age =
+          now.difference(_day(DateTime.fromMillisecondsSinceEpoch(ts))).inDays;
+      if (age > limitDays) {
+        warnings.add('$what price was saved $age days ago. Check the live price.');
+      }
+    }
+
+    stale(q.mode.label, rate!.updatedAt, 14);
+    stale('Hotel', dest.hotelUpdatedAt, 30);
 
     final disc = (profile.childDiscountPct / 100).clamp(0.0, 1.0);
     final payers = q.adults + q.children * (1 - disc);
@@ -122,7 +147,7 @@ class Planner {
     lines.add(QuoteLine(
       '${q.mode.label} ${q.roundTrip ? "(return)" : "(one way)"}',
       '${q.origin.trim()} → ${dest.name}',
-      _r(rate!.pricePerPerson * payers * legs),
+      _r(rate.pricePerPerson * payers * legs),
     ));
     lines.add(QuoteLine(
       'Hotel (${q.tier.label})',
