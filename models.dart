@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'services/crypto_service.dart';
 import 'services/vault.dart';
 
 double _d(dynamic v, double def) => v is num ? v.toDouble() : def;
@@ -93,6 +94,7 @@ class Destination {
   List<int> peakMonths; // 1..12
   double peakSurchargePct; // applied to hotel on peak nights
   int hotelUpdatedAt; // epoch ms, 0 = unknown
+  String source; // 'owner' or 'estimate'
 
   Destination({
     required this.id,
@@ -109,6 +111,7 @@ class Destination {
     List<int>? peakMonths,
     this.peakSurchargePct = 0,
     this.hotelUpdatedAt = 0,
+    this.source = 'owner',
   })  : highlights = highlights ?? [],
         peakMonths = peakMonths ?? [];
 
@@ -138,6 +141,7 @@ class Destination {
         'peakMonths': peakMonths,
         'peakSurchargePct': peakSurchargePct,
         'hotelUpdatedAt': hotelUpdatedAt,
+        'source': source,
       };
 
   factory Destination.fromJson(Map<String, dynamic> j) => Destination(
@@ -159,6 +163,7 @@ class Destination {
             [],
         peakSurchargePct: _d(j['peakSurchargePct'], 0),
         hotelUpdatedAt: _i(j['hotelUpdatedAt'], 0),
+        source: _s(j['source'], 'owner'),
       );
 }
 
@@ -171,6 +176,7 @@ class TransportRate {
   double hours; // one way, 0 = unknown
   String notes;
   int updatedAt; // epoch ms when the price was last confirmed, 0 = unknown
+  String source; // 'owner' or 'estimate'
 
   TransportRate({
     required this.id,
@@ -181,6 +187,7 @@ class TransportRate {
     this.hours = 0,
     this.notes = '',
     this.updatedAt = 0,
+    this.source = 'owner',
   });
 
   Map<String, dynamic> toJson() => {
@@ -192,6 +199,7 @@ class TransportRate {
         'hours': hours,
         'notes': notes,
         'updatedAt': updatedAt,
+        'source': source,
       };
 
   factory TransportRate.fromJson(Map<String, dynamic> j) => TransportRate(
@@ -206,6 +214,7 @@ class TransportRate {
         hours: _d(j['hours'], 0),
         notes: _s(j['notes']),
         updatedAt: _i(j['updatedAt'], 0),
+        source: _s(j['source'], 'owner'),
       );
 }
 
@@ -243,16 +252,23 @@ class Inquiry {
 
 String newId() => DateTime.now().microsecondsSinceEpoch.toString();
 
-/// All agency data lives in the Android-Keystore-encrypted vault.
+/// Agency data for the unlocked account. Stored as one AES-256-GCM blob
+/// (key held in memory only), inside the Android-Keystore-backed vault.
+/// The same blob is what gets backed up to the cloud.
 class DataStore extends ChangeNotifier {
   static final DataStore instance = DataStore._();
   DataStore._();
 
-  static const _key = 'agency_data_v1';
-
   AgencyProfile profile = AgencyProfile();
   List<Destination> destinations = [];
   List<TransportRate> transports = [];
+  List<String> notes = [];
+
+  String? _accountId;
+  List<int>? _dek;
+
+  /// Called after every local save so the cloud copy can follow.
+  VoidCallback? onLocalSave;
 
   Destination? destById(String id) {
     for (final d in destinations) {
@@ -261,44 +277,97 @@ class DataStore extends ChangeNotifier {
     return null;
   }
 
-  Future<void> load() async {
-    final raw = await Vault.read(_key);
-    if (raw != null) {
-      try {
-        final j = jsonDecode(raw) as Map<String, dynamic>;
-        profile = AgencyProfile.fromJson(
-            (j['profile'] as Map?)?.cast<String, dynamic>() ?? {});
-        destinations = ((j['destinations'] as List?) ?? [])
-            .map((e) => Destination.fromJson((e as Map).cast<String, dynamic>()))
-            .toList();
-        transports = ((j['transports'] as List?) ?? [])
-            .map((e) =>
-                TransportRate.fromJson((e as Map).cast<String, dynamic>()))
-            .toList();
-      } catch (_) {
-        // Never overwrite unreadable data: keep a copy and start clean.
-        await Vault.write('agency_data_backup', raw);
+  Map<String, dynamic> _toMap() => {
+        'profile': profile.toJson(),
+        'destinations': destinations.map((e) => e.toJson()).toList(),
+        'transports': transports.map((e) => e.toJson()).toList(),
+        'notes': notes,
+      };
+
+  static List<Destination> _dests(Map<String, dynamic> j) =>
+      ((j['destinations'] as List?) ?? [])
+          .map((e) => Destination.fromJson((e as Map).cast<String, dynamic>()))
+          .toList();
+
+  static List<TransportRate> _trans(Map<String, dynamic> j) =>
+      ((j['transports'] as List?) ?? [])
+          .map((e) => TransportRate.fromJson((e as Map).cast<String, dynamic>()))
+          .toList();
+
+  void replaceFrom(String json) {
+    final j = jsonDecode(json) as Map<String, dynamic>;
+    profile = AgencyProfile.fromJson(
+        (j['profile'] as Map?)?.cast<String, dynamic>() ?? {});
+    destinations = _dests(j);
+    transports = _trans(j);
+    notes = ((j['notes'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
+
+  /// Adds items that exist only in [cloudJson]. Local items win on conflict.
+  void mergeFrom(String cloudJson) {
+    final j = jsonDecode(cloudJson) as Map<String, dynamic>;
+    for (final d in _dests(j)) {
+      if (!destinations.any((x) => x.id == d.id)) destinations.add(d);
+    }
+    for (final t in _trans(j)) {
+      if (!transports.any((x) => x.id == t.id)) transports.add(t);
+    }
+    for (final n in ((j['notes'] as List?) ?? [])) {
+      if (!notes.contains(n.toString())) notes.add(n.toString());
+    }
+  }
+
+  Future<void> load(String accountId, List<int> dek) async {
+    _accountId = accountId;
+    _dek = dek;
+    profile = AgencyProfile();
+    destinations = [];
+    transports = [];
+    notes = [];
+    final raw = await Vault.read('data_$accountId');
+    if (raw != null && raw.isNotEmpty) {
+      final plain = await CryptoService.open(dek, raw);
+      var ok = false;
+      if (plain != null) {
+        try {
+          replaceFrom(utf8.decode(plain));
+          ok = true;
+        } catch (_) {}
       }
+      // Never overwrite data we could not read: keep a copy.
+      if (!ok) await Vault.write('data_bad_$accountId', raw);
     }
     notifyListeners();
   }
 
+  Future<String> encryptedBlob() async =>
+      CryptoService.seal(_dek!, utf8.encode(jsonEncode(_toMap())));
+
+  /// Local save by the owner: marks the cloud copy as out of date.
   Future<void> save() async {
-    await Vault.write(
-      _key,
-      jsonEncode({
-        'profile': profile.toJson(),
-        'destinations': destinations.map((e) => e.toJson()).toList(),
-        'transports': transports.map((e) => e.toJson()).toList(),
-      }),
-    );
+    final id = _accountId;
+    if (id == null || _dek == null) return;
+    await Vault.write('data_$id', await encryptedBlob());
+    await Vault.write('dirty_$id', '1');
+    notifyListeners();
+    onLocalSave?.call();
+  }
+
+  /// Save after data arrived from the cloud (does not mark as changed).
+  Future<void> saveFromSync() async {
+    final id = _accountId;
+    if (id == null || _dek == null) return;
+    await Vault.write('data_$id', await encryptedBlob());
     notifyListeners();
   }
 
   void unload() {
+    _accountId = null;
+    _dek = null;
     profile = AgencyProfile();
     destinations = [];
     transports = [];
+    notes = [];
     notifyListeners();
   }
 }

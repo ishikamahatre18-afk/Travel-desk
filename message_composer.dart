@@ -26,6 +26,7 @@ class MessageComposer {
     required bool showBreakdown,
     String? weather,
     String? fxLine,
+    bool estimated = false,
     DateTime? today,
   }) {
     if (!r.ok) return '';
@@ -113,6 +114,9 @@ class MessageComposer {
     b.writeln('Total package: ${money(profile, r.total)}');
     b.writeln('Approx. per person: ${money(profile, r.perPerson)}');
     if (profile.gstPct > 0) b.writeln('(Inclusive of applicable taxes)');
+    if (estimated) {
+      b.writeln('(Indicative estimate. Final price is confirmed at booking.)');
+    }
     if (fxLine != null) b.writeln(fxLine);
     b.writeln();
 

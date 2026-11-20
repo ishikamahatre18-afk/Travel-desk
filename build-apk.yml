@@ -1,0 +1,106 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Organize files into folders
+        run: |
+          python3 - <<'PY'
+          import os, shutil
+          layout = {
+            "lib": ["main.dart", "models.dart", "theme.dart", "widgets.dart"],
+            "lib/data": ["cities.dart", "iata.dart"],
+            "lib/chat": ["chat_models.dart", "account_actions.dart"],
+            "lib/ai": ["brain.dart", "agent.dart", "tools.dart"],
+            "lib/services": ["vault.dart", "crypto_service.dart", "account_service.dart",
+                             "cloud_service.dart", "planner.dart", "message_composer.dart",
+                             "live_api.dart", "estimator.dart", "resolver.dart",
+                             "flight_fares.dart", "hotel_rates.dart"],
+            "lib/screens": ["login_screen.dart", "chat_screen.dart"],
+            "test": ["planner_test.dart", "chat_test.dart"],
+            "scripts": ["patch_android.py"],
+            "android_overlay": ["MainActivity.kt"],
+          }
+          for folder, files in layout.items():
+              os.makedirs(folder, exist_ok=True)
+              for f in files:
+                  if os.path.exists(f):
+                      shutil.move(f, os.path.join(folder, f))
+          # files from earlier versions, no longer used
+          for old in ("auth_service.dart", "lib/services/auth_service.dart",
+                      "home_screen.dart", "quote_tab.dart", "rates_tab.dart", "editors.dart",
+                      "settings_tab.dart", "result_screen.dart", "nlu.dart", "engine.dart",
+                      "lib/screens/home_screen.dart", "lib/screens/quote_tab.dart",
+                      "lib/screens/rates_tab.dart", "lib/screens/editors.dart",
+                      "lib/screens/settings_tab.dart", "lib/screens/result_screen.dart"):
+              if os.path.exists(old):
+                  os.remove(old)
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android shell
+        run: |
+          flutter create --platforms=android --org com.agencyassist --project-name travel_desk "$RUNNER_TEMP/shell"
+          cp -r "$RUNNER_TEMP/shell/android" ./android
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.jks
+            echo "Signing key restored."
+          else
+            echo "::warning::KEYSTORE_BASE64 secret is missing"
+          fi
+
+      - name: Apply security hardening and signing
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: python3 scripts/patch_android.py
+
+      - run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+        continue-on-error: true
+
+      - name: Unit tests
+        run: flutter test
+        continue-on-error: true
+
+      - name: Build release APK
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          MODEL_URL: ${{ secrets.MODEL_URL }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: >
+          flutter build apk --release
+          --build-number=${{ github.run_number }}
+          --dart-define=SUPABASE_URL="$SUPABASE_URL"
+          --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+          --dart-define=MODEL_URL="$MODEL_URL"
+          --dart-define=HUGGINGFACE_TOKEN="$HUGGINGFACE_TOKEN"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: travel-desk-apk
+          path: build/app/outputs/flutter-apk/app-release.apk

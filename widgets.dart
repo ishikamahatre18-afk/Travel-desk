@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'theme.dart';
 
@@ -102,3 +103,135 @@ class NoticeCard extends StatelessWidget {
 Widget gap([double h = 14]) => SizedBox(height: h);
 
 double? parseNum(String s) => double.tryParse(s.trim().replaceAll(',', ''));
+
+/// Text field with a suggestion list (saved places plus built-in cities).
+class PlaceField extends StatefulWidget {
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final List<String> Function() options;
+  const PlaceField({
+    super.key,
+    required this.controller,
+    required this.label,
+    required this.icon,
+    required this.options,
+  });
+
+  @override
+  State<PlaceField> createState() => _PlaceFieldState();
+}
+
+class _PlaceFieldState extends State<PlaceField> {
+  final FocusNode _node = FocusNode();
+
+  @override
+  void dispose() {
+    _node.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RawAutocomplete<String>(
+      textEditingController: widget.controller,
+      focusNode: _node,
+      optionsBuilder: (v) {
+        final q = v.text.trim().toLowerCase();
+        if (q.isEmpty) return const Iterable<String>.empty();
+        final hits = widget
+            .options()
+            .where((o) => o.toLowerCase().contains(q))
+            .toList()
+          ..sort((a, b) {
+            final sa = a.toLowerCase().startsWith(q) ? 0 : 1;
+            final sb = b.toLowerCase().startsWith(q) ? 0 : 1;
+            return sa != sb ? sa - sb : a.compareTo(b);
+          });
+        return hits.take(8);
+      },
+      fieldViewBuilder: (context, ctrl, node, onSubmit) => TextField(
+        controller: ctrl,
+        focusNode: node,
+        textCapitalization: TextCapitalization.words,
+        decoration:
+            InputDecoration(labelText: widget.label, prefixIcon: Icon(widget.icon)),
+      ),
+      optionsViewBuilder: (context, onSelected, options) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(14),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: 260,
+              maxWidth: MediaQuery.of(context).size.width - 32,
+            ),
+            child: ListView(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              children: [
+                for (final o in options)
+                  ListTile(dense: true, title: Text(o), onTap: () => onSelected(o)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shows a recovery code once and makes the owner confirm they saved it.
+Future<void> showRecoveryCodeDialog(BuildContext context, String code) {
+  var saved = false;
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setD) => AlertDialog(
+        title: const Text('Your recovery code'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text(
+            'Write this down and keep it somewhere safe. If you forget your '
+            'password, this code is the only way to open your data. It is '
+            'shown once and cannot be looked up later.',
+          ),
+          gap(12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.bg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.line),
+            ),
+            child: SelectableText(code,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+          ),
+          TextButton.icon(
+            onPressed: () => Clipboard.setData(ClipboardData(text: code)),
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('Copy'),
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            value: saved,
+            onChanged: (v) => setD(() => saved = v ?? false),
+            title: const Text('I have saved this code'),
+          ),
+        ]),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(120, 44)),
+            onPressed: saved ? () => Navigator.pop(c) : null,
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    ),
+  );
+}

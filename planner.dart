@@ -22,6 +22,8 @@ class QuoteResult {
   final TransportRate? rate;
   final bool needsRate;
   final bool needsHotel;
+  final bool rateEstimated;
+  final bool destEstimated;
 
   const QuoteResult({
     this.errors = const [],
@@ -38,9 +40,12 @@ class QuoteResult {
     this.rate,
     this.needsRate = false,
     this.needsHotel = false,
+    this.rateEstimated = false,
+    this.destEstimated = false,
   });
 
   bool get ok => errors.isEmpty;
+  bool get estimated => rateEstimated || destEstimated;
 }
 
 /// Deterministic, fully offline planner. Every number comes from the owner's
@@ -101,8 +106,8 @@ class Planner {
       }
     }
     if (rate == null) {
-      errors.add('No ${q.mode.label} rate saved from ${q.origin.trim()} '
-          'to ${dest.name}. Add it under Rates.');
+      errors.add('No ${q.mode.label} price available from ${q.origin.trim()} '
+          'to ${dest.name}. Enter it below.');
     } else if (rate.pricePerPerson <= 0) {
       errors.add('The saved ${q.mode.label} price is 0. Update it under Rates.');
     }
@@ -129,8 +134,21 @@ class Planner {
       }
     }
 
-    stale(q.mode.label, rate!.updatedAt, 14);
-    stale('Hotel', dest.hotelUpdatedAt, 30);
+    final rt = rate!;
+    final rateEst = rt.source == 'estimate';
+    final destEst = dest.source == 'estimate';
+    if (rateEst) {
+      warnings.add('${q.mode.label} price is an ESTIMATE (roughly +/-35%). '
+          'Review it below before sending.');
+    } else {
+      stale(q.mode.label, rt.updatedAt, 14);
+    }
+    if (destEst) {
+      warnings.add('Hotel, meals and sightseeing are ESTIMATES for ${dest.name}. '
+          'Review them below before sending.');
+    } else {
+      stale('Hotel', dest.hotelUpdatedAt, 30);
+    }
 
     final disc = (profile.childDiscountPct / 100).clamp(0.0, 1.0);
     final payers = q.adults + q.children * (1 - disc);
@@ -147,7 +165,7 @@ class Planner {
     lines.add(QuoteLine(
       '${q.mode.label} ${q.roundTrip ? "(return)" : "(one way)"}',
       '${q.origin.trim()} → ${dest.name}',
-      _r(rate.pricePerPerson * payers * legs),
+      _r(rt.pricePerPerson * payers * legs),
     ));
     lines.add(QuoteLine(
       'Hotel (${q.tier.label})',
@@ -179,7 +197,7 @@ class Planner {
     if (dest.name.toUpperCase().contains('SAMPLE')) {
       warnings.add('This destination is SAMPLE data. Replace it with your real rates.');
     }
-    if (rate.mode == TravelMode.road && rate.hours > 14) {
+    if (rt.mode == TravelMode.road && rt.hours > 14) {
       warnings.add('Road journey is over 14 hours each way. Confirm with the client.');
     }
 
@@ -210,7 +228,9 @@ class Planner {
       perPerson: _r(total / heads),
       nights: nights,
       rooms: rooms,
-      rate: rate,
+      rate: rt,
+      rateEstimated: rateEst,
+      destEstimated: destEst,
     );
   }
 }
