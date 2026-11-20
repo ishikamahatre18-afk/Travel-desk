@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:supabase/supabase.dart';
+import 'package:supabase/supabase.dart' hide Session;
 
 import '../models.dart';
 import 'account_service.dart';

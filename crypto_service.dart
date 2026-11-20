@@ -1,14 +1,14 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:crypto/crypto.dart';
+import 'package:crypto/crypto.dart' as hash;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 
 /// PBKDF2-HMAC-SHA256 producing one 32-byte block. Top-level so it can run
 /// in a background isolate through compute().
 List<int> pbkdf2Derive(Map<String, dynamic> a) {
-  final hmac = Hmac(sha256, utf8.encode(a['p'] as String));
+  final hmac = hash.Hmac(hash.sha256, utf8.encode(a['p'] as String));
   final salt = (a['s'] as List).cast<int>();
   final iterations = a['i'] as int;
   var u = hmac.convert([...salt, 0, 0, 0, 1]).bytes;
