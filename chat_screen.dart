@@ -6,12 +6,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../ai/agent.dart';
 import '../ai/brain.dart';
 import '../ai/tools.dart';
+import '../ai/voice.dart';
 import '../chat/account_actions.dart';
 import '../chat/chat_models.dart';
 import '../services/account_service.dart';
 import '../models.dart';
 import '../services/cloud_service.dart';
 import '../theme.dart';
+import '../widgets.dart';
 
 class _Item {
   final bool mine;
@@ -50,6 +52,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scroll = ScrollController();
   final _focus = FocusNode();
   var _busy = false;
+  var _seen = 0; // bubbles that have already played their entrance
 
   @override
   void initState() {
@@ -64,11 +67,13 @@ class _ChatScreenState extends State<ChatScreen> {
       _items.add(_Item.bot(m));
     }
     Brain.instance.check();
+    Voice.instance.init();
   }
 
   @override
   void dispose() {
     Brain.instance.resetChat(); // the conversation never survives a lock
+    Voice.instance.stop();
     _input.dispose();
     _scroll.dispose();
     _focus.dispose();
@@ -90,6 +95,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final t = text.trim();
     if (t.isEmpty || _busy) return;
     _input.clear();
+    HapticFeedback.selectionClick();
+    Voice.instance.stop();
     setState(() {
       _items.add(_Item.user(t));
       _busy = true;
@@ -113,6 +120,11 @@ class _ChatScreenState extends State<ChatScreen> {
       _busy = false;
     });
     _toEnd();
+    final spoken = replies
+        .where((m) => m.attachment == null && m.action == null && m.text.isNotEmpty)
+        .map((m) => m.text)
+        .join(' ');
+    if (spoken.isNotEmpty) Voice.instance.speak(spoken);
     for (final m in replies) {
       if (m.action != null) await _run(m.action!);
     }
@@ -184,6 +196,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _seen = _items.length);
     // Quick replies only under the newest bot message.
     int lastWithReplies = -1;
     if (_items.isNotEmpty && !_items.last.mine) {
@@ -191,40 +204,75 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 20,
+        titleSpacing: 18,
+        shape: const Border(bottom: BorderSide(color: AppTheme.line, width: 0.8)),
         title: Row(children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-                color: AppTheme.teal.withValues(alpha: 0.12), shape: BoxShape.circle),
-            child: const Icon(Icons.travel_explore, size: 20, color: AppTheme.teal),
-          ),
-          const SizedBox(width: 10),
+          const AppLogo(size: 36),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Travel Desk', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-              ValueListenableBuilder<SyncState>(
-                valueListenable: CloudService.instance.state,
-                builder: (c, st, _) => Text(
-                  'Private · works offline${CloudService.configured ? ' · ${st.text}' : ''}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11.5, color: Colors.black54, fontWeight: FontWeight.w400),
+              const Text('Travel Desk',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+              ListenableBuilder(
+                listenable: Voice.instance,
+                builder: (c, _) => AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  child: Voice.instance.speaking
+                      ? const Row(key: ValueKey('speaking'), children: [
+                          SpeakingBars(),
+                          SizedBox(width: 6),
+                          Text('Speaking', style: TextStyle(fontSize: 11.5, color: AppTheme.teal)),
+                        ])
+                      : ValueListenableBuilder<SyncState>(
+                          key: const ValueKey('status'),
+                          valueListenable: CloudService.instance.state,
+                          builder: (c, st, _) => Text(
+                            'Private · works offline${CloudService.configured ? ' · ${st.text}' : ''}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 11.5, color: Colors.black54, fontWeight: FontWeight.w400),
+                          ),
+                        ),
                 ),
               ),
             ]),
           ),
         ]),
         actions: [
+          ListenableBuilder(
+            listenable: Voice.instance,
+            builder: (c, _) => IconButton(
+              tooltip: Voice.instance.enabled ? 'Mute voice' : 'Turn voice on',
+              onPressed: () => Voice.instance.setEnabled(!Voice.instance.enabled),
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder: (w, a) => ScaleTransition(scale: a, child: w),
+                child: Icon(
+                  Voice.instance.enabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                  key: ValueKey(Voice.instance.enabled),
+                  color: Voice.instance.enabled ? AppTheme.teal : Colors.black45,
+                ),
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Lock',
-            icon: const Icon(Icons.lock_outline),
+            icon: const Icon(Icons.lock_outline_rounded),
             onPressed: widget.onLock,
           ),
+          const SizedBox(width: 4),
         ],
       ),
-      body: SafeArea(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFF9FCFC), Color(0xFFEDF5F5)],
+          ),
+        ),
+        child: SafeArea(
         child: Column(children: [
           Expanded(
             child: ListView.builder(
@@ -245,7 +293,11 @@ class _ChatScreenState extends State<ChatScreen> {
                         );
                 }
                 final it = _items[i];
-                return _Bubble(
+                final fresh = i >= _seen;
+                return Appear(
+                  animate: fresh,
+                  from: it.mine ? const Offset(14, 6) : const Offset(-10, 10),
+                  child: _Bubble(
                   item: it,
                   showReplies: i == lastWithReplies && !_busy,
                   onReply: _tapReply,
@@ -258,6 +310,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     }
                   },
                   onWhatsApp: (t) => _run(ChatAction(ChatActionType.whatsapp, text: t)),
+                  ),
                 );
               },
             ),
@@ -274,6 +327,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 : const _SetupPanel(),
           ),
         ]),
+      ),
       ),
     );
   }
@@ -349,13 +403,11 @@ class _Bubble extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: Wrap(spacing: 8, runSpacing: 8, children: [
-                for (final q in m.replies)
-                  ActionChip(
-                    label: Text(q.label),
-                    onPressed: () => onReply(q),
-                    backgroundColor: AppTheme.teal.withValues(alpha: 0.08),
-                    side: BorderSide(color: AppTheme.teal.withValues(alpha: 0.35)),
-                    labelStyle: const TextStyle(color: AppTheme.teal, fontWeight: FontWeight.w600),
+                for (var qi = 0; qi < m.replies.length; qi++)
+                  Appear(
+                    delay: Duration(milliseconds: 120 + 70 * qi),
+                    from: const Offset(0, 8),
+                    child: _chip(m.replies[qi]),
                   ),
               ]),
             ),
@@ -364,13 +416,25 @@ class _Bubble extends StatelessWidget {
     );
   }
 
+  Widget _chip(QuickReply q) => ActionChip(
+        label: Text(q.label),
+        onPressed: () => onReply(q),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        pressElevation: 0,
+        side: BorderSide(color: AppTheme.teal.withValues(alpha: 0.30)),
+        shape: const StadiumBorder(),
+        labelStyle: const TextStyle(color: AppTheme.teal, fontWeight: FontWeight.w600, fontSize: 13.5),
+      );
+
   Widget _quoteCard(QuoteCard c) => Container(
         margin: const EdgeInsets.only(top: 8),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           border: Border.all(color: AppTheme.line),
+          boxShadow: AppTheme.softShadow,
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c.route, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.ink)),
@@ -439,8 +503,9 @@ class _Bubble extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           border: Border.all(color: AppTheme.line),
+          boxShadow: AppTheme.softShadow,
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -492,8 +557,9 @@ class _Bubble extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           border: Border.all(color: AppTheme.line),
+          boxShadow: AppTheme.softShadow,
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -618,8 +684,7 @@ class _Typing extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppTheme.line),
           ),
-          child: const SizedBox(
-              width: 34, child: LinearProgressIndicator(minHeight: 3, color: AppTheme.teal)),
+          child: const ThinkingDots(),
         ),
       );
 }
@@ -637,44 +702,64 @@ class _InputBar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-        decoration: const BoxDecoration(
-          color: AppTheme.bg,
-          border: Border(top: BorderSide(color: AppTheme.line)),
-        ),
-        child: Row(children: [
-          Expanded(
-            child: TextField(
-              controller: controller,
-              focusNode: focus,
-              minLines: 1,
-              maxLines: 4,
-              textInputAction: TextInputAction.send,
-              textCapitalization: TextCapitalization.sentences,
-              onSubmitted: (_) => onSend(),
-              decoration: InputDecoration(
-                hintText: 'Message your assistant…',
-                contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(26),
-                    borderSide: const BorderSide(color: AppTheme.line)),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(26),
-                    borderSide: const BorderSide(color: AppTheme.line)),
-                focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(26),
-                    borderSide: const BorderSide(color: AppTheme.teal, width: 1.6)),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: AppTheme.line),
+            boxShadow: AppTheme.softShadow,
+          ),
+          padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                focusNode: focus,
+                minLines: 1,
+                maxLines: 5,
+                textInputAction: TextInputAction.newline,
+                textCapitalization: TextCapitalization.sentences,
+                style: const TextStyle(fontSize: 15.5, color: AppTheme.ink),
+                decoration: const InputDecoration(
+                  hintText: 'Ask anything about a trip…',
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-            onPressed: busy ? null : onSend,
-            style: IconButton.styleFrom(
-                backgroundColor: AppTheme.teal, minimumSize: const Size(48, 48)),
-            icon: const Icon(Icons.arrow_upward),
-          ),
-        ]),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller,
+              builder: (c, v, _) {
+                final can = v.text.trim().isNotEmpty && !busy;
+                return AnimatedScale(
+                  scale: can ? 1 : 0.86,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutBack,
+                  child: AnimatedOpacity(
+                    opacity: can ? 1 : 0.45,
+                    duration: const Duration(milliseconds: 180),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: IconButton.filled(
+                        onPressed: can ? onSend : null,
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppTheme.teal,
+                          disabledBackgroundColor: AppTheme.teal,
+                          minimumSize: const Size(44, 44),
+                        ),
+                        icon: const Icon(Icons.arrow_upward_rounded, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ]),
+        ),
       );
 }

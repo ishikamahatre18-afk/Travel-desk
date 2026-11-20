@@ -409,19 +409,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 72,
-                      height: 72,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                            colors: [AppTheme.teal, Color(0xFF63C7B8)]),
-                        borderRadius: BorderRadius.circular(22),
-                      ),
-                      child: const Icon(Icons.flight_takeoff, color: Colors.white, size: 34),
-                    ),
-                  ),
+                  const Center(child: Appear(from: Offset(0, 8), child: AppLogo(size: 84))),
                   gap(20),
                   Text(_title,
                       textAlign: TextAlign.center,

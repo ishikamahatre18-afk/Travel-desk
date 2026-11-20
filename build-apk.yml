@@ -19,7 +19,7 @@ jobs:
             "lib": ["main.dart", "models.dart", "theme.dart", "widgets.dart"],
             "lib/data": ["cities.dart", "iata.dart"],
             "lib/chat": ["chat_models.dart", "account_actions.dart"],
-            "lib/ai": ["brain.dart", "agent.dart", "tools.dart"],
+            "lib/ai": ["brain.dart", "agent.dart", "tools.dart", "voice.dart"],
             "lib/services": ["vault.dart", "crypto_service.dart", "account_service.dart",
                              "cloud_service.dart", "planner.dart", "message_composer.dart",
                              "live_api.dart", "estimator.dart", "resolver.dart",
@@ -27,7 +27,10 @@ jobs:
             "lib/screens": ["login_screen.dart", "chat_screen.dart"],
             "test": ["planner_test.dart", "chat_test.dart"],
             "scripts": ["patch_android.py"],
-            "android_overlay": ["MainActivity.kt"],
+            "android_overlay": ["MainActivity.kt",
+                                "ic_bg_432.png",
+                                "ic_fg_108.png", "ic_fg_162.png", "ic_fg_216.png", "ic_fg_324.png", "ic_fg_432.png",
+                                "ic_legacy_48.png", "ic_legacy_72.png", "ic_legacy_96.png", "ic_legacy_144.png", "ic_legacy_192.png"],
           }
           for folder, files in layout.items():
               os.makedirs(folder, exist_ok=True)

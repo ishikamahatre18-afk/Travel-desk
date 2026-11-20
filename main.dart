@@ -98,13 +98,25 @@ class _GateState extends State<Gate> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final s = _session;
-    if (s == null) {
-      return LoginScreen(onUnlocked: _onUnlocked);
-    }
-    return ChatScreen(
-      session: s,
-      onLock: lock,
-      onSessionChanged: _onSessionChanged,
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 420),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.985, end: 1).animate(anim),
+          child: child,
+        ),
+      ),
+      child: s == null
+          ? LoginScreen(key: const ValueKey('login'), onUnlocked: _onUnlocked)
+          : ChatScreen(
+              key: const ValueKey('chat'),
+              session: s,
+              onLock: lock,
+              onSessionChanged: _onSessionChanged,
+            ),
     );
   }
 }

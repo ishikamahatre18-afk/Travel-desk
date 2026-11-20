@@ -33,7 +33,9 @@ if "<queries>" not in m:
     m = m.replace(
         "</manifest>",
         '    <queries>\n        <intent>\n            <action android:name="android.intent.action.VIEW"/>\n'
-        '            <data android:scheme="https"/>\n        </intent>\n    </queries>\n</manifest>',
+        '            <data android:scheme="https"/>\n        </intent>\n'
+        '        <intent>\n            <action android:name="android.intent.action.TTS_SERVICE"/>\n        </intent>\n'
+        '    </queries>\n</manifest>',
     )
 manifest.write_text(m)
 
@@ -58,6 +60,35 @@ if g.exists():
     g.write_text(t)
 else:
     sys.exit("build.gradle.kts not found")
+
+# ---- App icon (adaptive + legacy) ------------------------------------------
+res = root / "app/src/main/res"
+overlay = pathlib.Path("android_overlay")
+legacy = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
+fore = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
+for dens, px in legacy.items():
+    d = res / f"mipmap-{dens}"
+    d.mkdir(parents=True, exist_ok=True)
+    src = overlay / f"ic_legacy_{px}.png"
+    if src.exists():
+        shutil.copy(src, d / "ic_launcher.png")
+for dens, px in fore.items():
+    d = res / f"mipmap-{dens}"
+    d.mkdir(parents=True, exist_ok=True)
+    src = overlay / f"ic_fg_{px}.png"
+    if src.exists():
+        shutil.copy(src, d / "ic_launcher_foreground.png")
+(res / "drawable-nodpi").mkdir(parents=True, exist_ok=True)
+if (overlay / "ic_bg_432.png").exists():
+    shutil.copy(overlay / "ic_bg_432.png", res / "drawable-nodpi/ic_launcher_bg.png")
+(res / "mipmap-anydpi-v26").mkdir(parents=True, exist_ok=True)
+(res / "mipmap-anydpi-v26/ic_launcher.xml").write_text(
+    '<?xml version="1.0" encoding="utf-8"?>\n'
+    '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
+    '    <background android:drawable="@drawable/ic_launcher_bg"/>\n'
+    '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n'
+    '</adaptive-icon>\n'
+)
 
 # FLAG_SECURE activity
 kotlin_dir = root / "app/src/main/kotlin/com/agencyassist/travel_desk"

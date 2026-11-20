@@ -7,6 +7,15 @@ class AppTheme {
   static const ink = Color(0xFF16313A);
   static const line = Color(0xFFDCE9E9);
 
+  /// A very soft lift for cards and the input bar.
+  static List<BoxShadow> get softShadow => [
+        BoxShadow(
+          color: const Color(0xFF0E4A4F).withValues(alpha: 0.07),
+          blurRadius: 22,
+          offset: const Offset(0, 8),
+        ),
+      ];
+
   static ThemeData light() {
     final scheme = ColorScheme.fromSeed(
       seedColor: teal,

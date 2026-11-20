@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -234,4 +236,201 @@ Future<void> showRecoveryCodeDialog(BuildContext context, String code) {
       ),
     ),
   );
+}
+
+// ---------------------------------------------------------------- brand & motion
+
+/// The app mark: a chat bubble holding a compass needle. The same artwork is
+/// used for the launcher icon.
+class AppLogo extends StatelessWidget {
+  final double size;
+  const AppLogo({super.key, this.size = 40});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF167C7C), Color(0xFF08343A)],
+          ),
+          borderRadius: BorderRadius.circular(size * 0.28),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF08343A).withValues(alpha: 0.22),
+              blurRadius: size * 0.35,
+              offset: Offset(0, size * 0.12),
+            ),
+          ],
+        ),
+        child: CustomPaint(painter: _MarkPainter()),
+      );
+}
+
+class _MarkPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width;
+    final cx = s / 2, cy = s / 2 - s * 0.015;
+    final r = s * 0.30;
+    final white = Paint()..color = Colors.white;
+    final tail = Path()
+      ..moveTo(cx - r * 0.78, cy + r * 0.55)
+      ..lineTo(cx - r * 1.02, cy + r * 1.10)
+      ..lineTo(cx - r * 0.18, cy + r * 0.93)
+      ..close();
+    canvas.drawPath(tail, white);
+    canvas.drawCircle(Offset(cx, cy), r, white);
+    final r2 = r * 0.80;
+    const deep = Color(0xFF0E5C60);
+    canvas.drawCircle(Offset(cx, cy), r2, Paint()..color = deep);
+
+    final len = r2 * 0.86, w = r2 * 0.26;
+    const ang = 40 * 3.1415926535 / 180;
+    Offset rot(double x, double y) => Offset(
+          cx + x * math.cos(ang) - y * math.sin(ang),
+          cy + x * math.sin(ang) + y * math.cos(ang),
+        );
+    Path tri(Offset a, Offset b, Offset c) => Path()
+      ..moveTo(a.dx, a.dy)
+      ..lineTo(b.dx, b.dy)
+      ..lineTo(c.dx, c.dy)
+      ..close();
+    canvas.drawPath(tri(rot(0, len), rot(-w, 0), rot(w, 0)), Paint()..color = const Color(0xFFD6E8E6));
+    canvas.drawPath(tri(rot(0, -len), rot(-w, 0), rot(w, 0)), Paint()..color = const Color(0xFFF4C478));
+    canvas.drawCircle(Offset(cx, cy), w * 0.34, Paint()..color = deep);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
+}
+
+/// Fades and slides its child in once. Used for chat bubbles and chips.
+class Appear extends StatefulWidget {
+  final Widget child;
+  final bool animate;
+  final Duration delay;
+  final Offset from;
+  const Appear({
+    super.key,
+    required this.child,
+    this.animate = true,
+    this.delay = Duration.zero,
+    this.from = const Offset(0, 12),
+  });
+
+  @override
+  State<Appear> createState() => _AppearState();
+}
+
+class _AppearState extends State<Appear> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 360));
+  late final Animation<double> _a = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.animate) {
+      _c.value = 1;
+    } else if (widget.delay == Duration.zero) {
+      _c.forward();
+    } else {
+      Future.delayed(widget.delay, () {
+        if (mounted) _c.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: _a,
+        child: AnimatedBuilder(
+          animation: _a,
+          builder: (c, ch) => Transform.translate(
+            offset: Offset(widget.from.dx * (1 - _a.value), widget.from.dy * (1 - _a.value)),
+            child: ch,
+          ),
+          child: widget.child,
+        ),
+      );
+}
+
+/// Three softly pulsing dots: "the assistant is thinking".
+class ThinkingDots extends StatefulWidget {
+  const ThinkingDots({super.key});
+  @override
+  State<ThinkingDots> createState() => _ThinkingDotsState();
+}
+
+class _ThinkingDotsState extends State<ThinkingDots> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _c,
+        builder: (c, _) => Row(mainAxisSize: MainAxisSize.min, children: [
+          for (var i = 0; i < 3; i++)
+            Container(
+              margin: EdgeInsets.only(right: i == 2 ? 0 : 5),
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF1F8A8A).withValues(
+                    alpha: 0.25 + 0.65 * math.pow(math.sin((_c.value * 2 * math.pi) - i * 0.9).clamp(0.0, 1.0), 2).toDouble()),
+              ),
+            ),
+        ]),
+      );
+}
+
+/// Small animated bars shown while the assistant is speaking.
+class SpeakingBars extends StatefulWidget {
+  const SpeakingBars({super.key});
+  @override
+  State<SpeakingBars> createState() => _SpeakingBarsState();
+}
+
+class _SpeakingBarsState extends State<SpeakingBars> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _c,
+        builder: (c, _) => Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+          for (var i = 0; i < 4; i++)
+            Container(
+              margin: const EdgeInsets.only(right: 2.5),
+              width: 3,
+              height: 5 + 9 * (0.5 + 0.5 * math.sin(_c.value * 2 * math.pi + i * 1.3)),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1F8A8A),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+        ]),
+      );
 }
