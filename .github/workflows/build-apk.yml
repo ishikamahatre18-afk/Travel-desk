@@ -14,7 +14,21 @@ jobs:
       - name: Organize files into folders
         run: |
           python3 - <<'PY'
-          import os, shutil
+          import os, re, shutil
+          # Phone uploads sometimes save a re-uploaded file under a new name
+          # such as "2_brain.dart" or "brain (1).dart". The newest copy wins.
+          dupes = []
+          for f in os.listdir("."):
+              m = re.match(r"^(\d+)_(.+\.(?:dart|py|png|kt|yml|sql|md))$", f)
+              if m:
+                  dupes.append((int(m.group(1)), f, m.group(2)))
+                  continue
+              m = re.match(r"^(.+?) \((\d+)\)(\.[A-Za-z]+)$", f)
+              if m:
+                  dupes.append((int(m.group(2)), f, m.group(1) + m.group(3)))
+          for _, f, base in sorted(dupes):
+              print("Using newer upload", f, "as", base)
+              os.replace(f, base)
           layout = {
             "lib": ["main.dart", "models.dart", "theme.dart", "widgets.dart"],
             "lib/data": ["cities.dart", "iata.dart"],
@@ -37,6 +51,7 @@ jobs:
               for f in files:
                   if os.path.exists(f):
                       shutil.move(f, os.path.join(folder, f))
+          # files from earlier versions, no longer used
           for old in ("auth_service.dart", "lib/services/auth_service.dart",
                       "home_screen.dart", "quote_tab.dart", "rates_tab.dart", "editors.dart",
                       "settings_tab.dart", "result_screen.dart", "nlu.dart", "engine.dart",
