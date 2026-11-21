@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:flutter_edge_ai_litertlm/flutter_edge_ai_litertlm.dart';
@@ -16,6 +18,13 @@ class Brain extends ChangeNotifier implements Llm {
   /// use the built-in catalog model.
   static const modelUrl = String.fromEnvironment('MODEL_URL');
 
+  /// Approximate size of the built-in catalog model (Gemma 4 E2B), in MB.
+  /// Used only to show "x of y" while downloading.
+  static const approxModelMb = 2580;
+
+  /// Loading a model into memory the first time can be slow on some phones.
+  static const loadTimeout = Duration(minutes: 10);
+
   static Future<void> initialize() async {
     await FlutterEdgeAi.initialize(
       inferenceEngines: const [LiteRtLmEngine()],
@@ -26,61 +35,139 @@ class Brain extends ChangeNotifier implements Llm {
   }
 
   BrainState state = BrainState.checking;
-  int progress = 0;
+  int progress = 0; // percent, 0..100
   String? error;
+
+  DateTime _phaseStart = DateTime.now();
+  DateTime _lastProgressAt = DateTime.now();
+  double _percentPerSec = 0; // smoothed
+  Timer? _tick;
+  bool _working = false;
 
   dynamic _model;
   dynamic _chat;
 
+  // ------------------------------------------------------ progress read-outs
+
+  Duration get elapsed => DateTime.now().difference(_phaseStart);
+  Duration get sinceProgress => DateTime.now().difference(_lastProgressAt);
+
+  /// Megabytes downloaded so far, estimated from the percentage.
+  double? get downloadedMb => modelUrl.isEmpty ? progress * approxModelMb / 100 : null;
+  double? get totalMb => modelUrl.isEmpty ? approxModelMb.toDouble() : null;
+
+  /// Smoothed speed in MB per second, once enough has been seen.
+  double? get speedMbPerSec {
+    final total = totalMb;
+    if (total == null || _percentPerSec <= 0) return null;
+    return _percentPerSec * total / 100;
+  }
+
+  Duration? get eta {
+    if (_percentPerSec <= 0 || progress <= 0 || progress >= 100) return null;
+    return Duration(seconds: ((100 - progress) / _percentPerSec).round());
+  }
+
+  /// True when the download has not moved for a while.
+  bool get stalled =>
+      state == BrainState.downloading && sinceProgress > const Duration(seconds: 90);
+
   void _set(BrainState s, {String? err}) {
     state = s;
     error = err;
+    _phaseStart = DateTime.now();
+    _tick?.cancel();
+    if (s == BrainState.downloading || s == BrainState.loading || s == BrainState.checking) {
+      // A one-second heartbeat keeps the elapsed time on screen moving, so the
+      // owner can always see the app is alive.
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) => notifyListeners());
+    }
     notifyListeners();
   }
 
-  /// Looks for an installed model and loads it.
+  void _onProgress(int p) {
+    final now = DateTime.now();
+    final v = p.clamp(0, 100);
+    final dt = now.difference(_lastProgressAt).inMilliseconds / 1000.0;
+    if (v > progress && dt > 0) {
+      final inst = (v - progress) / dt;
+      _percentPerSec = _percentPerSec == 0 ? inst : _percentPerSec * 0.8 + inst * 0.2;
+    }
+    if (v != progress) _lastProgressAt = now;
+    progress = v;
+    notifyListeners();
+  }
+
+  // -------------------------------------------------------------- lifecycle
+
+  /// Looks for an installed model and loads it into memory.
   Future<void> check() async {
-    if (state == BrainState.ready) return;
+    if (state == BrainState.ready || _working) return;
+    _working = true;
     _set(BrainState.checking);
     try {
-      _model = await FlutterEdgeAi.getActiveModel(maxTokens: 4096);
+      _model = await FlutterEdgeAi.getActiveModel(maxTokens: 4096).timeout(loadTimeout);
       _set(BrainState.ready);
     } on StateError {
+      // No model installed yet: the one-time download is next.
       _set(BrainState.notInstalled);
+    } on TimeoutException {
+      _set(BrainState.error,
+          err: 'Loading the assistant took more than ${loadTimeout.inMinutes} minutes. '
+              'Close other apps to free memory, then try again.');
     } catch (e) {
       _set(BrainState.error, err: 'The assistant could not start: $e');
+    } finally {
+      _working = false;
     }
   }
 
   /// One-time download. Needs internet only for this step.
   Future<void> install() async {
-    if (state == BrainState.downloading) return;
+    if (_working || state == BrainState.downloading) return;
+    _working = true;
     progress = 0;
+    _percentPerSec = 0;
+    _lastProgressAt = DateTime.now();
     _set(BrainState.downloading);
     try {
       if (modelUrl.isEmpty) {
         await FlutterEdgeAi.installModelFromCatalog(LiteRtLmModels.gemma4E2bIt.generic)
-            .withProgress((p) {
-          progress = p;
-          notifyListeners();
-        }).install();
+            .withProgress(_onProgress)
+            .install();
       } else {
         await FlutterEdgeAi.installModel(
           modelType: ModelType.gemmaIt,
           fileType: ModelFileType.litertlm,
-        ).fromNetwork(modelUrl).withProgress((p) {
-          progress = p;
-          notifyListeners();
-        }).install();
+        ).fromNetwork(modelUrl).withProgress(_onProgress).install();
       }
+      progress = 100;
       _set(BrainState.loading);
-      _model = await FlutterEdgeAi.getActiveModel(maxTokens: 4096);
+      _model = await FlutterEdgeAi.getActiveModel(maxTokens: 4096).timeout(loadTimeout);
       _set(BrainState.ready);
+    } on TimeoutException {
+      _set(BrainState.error,
+          err: 'The download finished, but loading the assistant took more than '
+              '${loadTimeout.inMinutes} minutes. Close other apps and try again.');
     } catch (e) {
       _set(BrainState.error,
-          err: 'The download did not finish: $e\nCheck the internet connection and storage space, then try again.');
+          err: 'The download did not finish: $e\n'
+              'Check the internet connection and free storage space, then try again.');
+    } finally {
+      _working = false;
     }
   }
+
+  /// Tries again after an error. If the model is already downloaded this only
+  /// reloads it; otherwise it starts the download again.
+  Future<void> retry() async {
+    if (_working) return;
+    state = BrainState.checking;
+    await check();
+    if (state == BrainState.notInstalled) await install();
+  }
+
+  // ------------------------------------------------------------------- chat
 
   /// Starts a fresh conversation, so the model forgets the previous turns.
   @override

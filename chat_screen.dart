@@ -614,59 +614,140 @@ class _Bubble extends StatelessWidget {
 
 class _SetupPanel extends StatelessWidget {
   const _SetupPanel();
+
+  static String _size(double mb) =>
+      mb >= 1000 ? '${(mb / 1000).toStringAsFixed(2)} GB' : '${mb.round()} MB';
+
+  static String _clock(Duration d) {
+    final m = d.inMinutes, s = d.inSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  static String _left(Duration d) {
+    if (d.inSeconds < 90) return 'about ${d.inSeconds.clamp(5, 90)} sec left';
+    if (d.inMinutes < 90) return 'about ${d.inMinutes + 1} min left';
+    return 'over an hour left';
+  }
+
   @override
   Widget build(BuildContext context) {
     final b = Brain.instance;
+    const muted = TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.35);
+    const title = TextStyle(fontWeight: FontWeight.w700, color: AppTheme.ink, fontSize: 15.5);
     Widget body;
     switch (b.state) {
       case BrainState.checking:
       case BrainState.loading:
-        body = const Row(children: [
-          SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.4, color: AppTheme.teal)),
-          SizedBox(width: 12),
-          Expanded(child: Text('Waking up your assistant…')),
+        final slow = b.state == BrainState.loading || b.elapsed.inSeconds >= 4;
+        body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+              b.state == BrainState.loading
+                  ? 'Download complete. Loading into memory…'
+                  : slow
+                      ? 'Loading your assistant into memory…'
+                      : 'Checking your assistant…',
+              style: title),
+          const SizedBox(height: 10),
+          const ClipRRect(
+            borderRadius: BorderRadius.all(Radius.circular(6)),
+            child: LinearProgressIndicator(minHeight: 6, color: AppTheme.teal),
+          ),
+          const SizedBox(height: 8),
+          Text(
+              slow
+                  ? 'Working for ${_clock(b.elapsed)}. The first start can take a few minutes while '
+                      'the phone prepares the assistant. Keep the app open.'
+                  : 'One moment…',
+              style: muted),
         ]);
       case BrainState.downloading:
+        final mb = b.downloadedMb, total = b.totalMb, speed = b.speedMbPerSec, left = b.eta;
+        final stats = <String>[
+          if (mb != null && total != null) '${_size(mb)} of ${_size(total)}',
+          if (speed != null) '${speed.toStringAsFixed(1)} MB/s',
+          if (left != null) _left(left),
+        ];
         body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Installing your assistant… ${b.progress}%',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.ink)),
+          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            const Expanded(child: Text('Downloading your assistant', style: title)),
+            Text('${b.progress}%',
+                style: const TextStyle(
+                    fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.teal, letterSpacing: -0.5)),
+          ]),
+          const SizedBox(height: 10),
+          TweenAnimationBuilder<double>(
+            tween: Tween(end: b.progress / 100),
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOutCubic,
+            builder: (c, v, _) => ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                // Indeterminate until the first percentage arrives.
+                value: b.progress <= 0 ? null : v,
+                minHeight: 8,
+                color: AppTheme.teal,
+                backgroundColor: AppTheme.teal.withValues(alpha: 0.12),
+              ),
+            ),
+          ),
           const SizedBox(height: 8),
-          LinearProgressIndicator(
-              value: b.progress <= 0 ? null : b.progress / 100, minHeight: 6, color: AppTheme.teal),
-          const SizedBox(height: 6),
-          const Text('Keep the app open and stay on Wi-Fi. This happens only once.',
-              style: TextStyle(fontSize: 12.5, color: Colors.black54)),
+          Text(
+              b.progress <= 0
+                  ? 'Connecting… ${_clock(b.elapsed)}'
+                  : stats.isEmpty
+                      ? 'Elapsed ${_clock(b.elapsed)}'
+                      : '${stats.join('  ·  ')}',
+              style: muted),
+          if (b.stalled) ...[
+            const SizedBox(height: 6),
+            Text(
+                'No progress for ${b.sinceProgress.inMinutes < 1 ? '${b.sinceProgress.inSeconds} seconds' : '${b.sinceProgress.inMinutes} minutes'}. '
+                'Check the internet connection. If it stays stuck, tap Try again.',
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFFB45309), height: 1.35)),
+            const SizedBox(height: 8),
+            OutlinedButton(onPressed: () => b.retry(), child: const Text('Try again')),
+          ] else ...[
+            const SizedBox(height: 6),
+            const Text('Keep the app open and stay on Wi-Fi. This happens only once.', style: muted),
+          ],
         ]);
       case BrainState.notInstalled:
       case BrainState.error:
+        final err = b.state == BrainState.error;
         body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(
-              b.state == BrainState.error
-                  ? (b.error ?? 'Something went wrong.')
-                  : 'One-time setup: install your private assistant',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.ink)),
+          Text(err ? 'The assistant needs attention' : 'One-time setup: install your private assistant',
+              style: title),
           const SizedBox(height: 4),
-          const Text(
-              'It downloads once (a few GB, use Wi-Fi). After that it works fully offline, and your chats never leave this phone.',
-              style: TextStyle(fontSize: 12.5, color: Colors.black54)),
-          const SizedBox(height: 10),
+          Text(
+              err
+                  ? (b.error ?? 'Something went wrong.')
+                  : 'It downloads once (about 2.6 GB, so use Wi-Fi and keep 4 GB free). '
+                      'After that it works fully offline, and your chats never leave this phone.',
+              style: muted),
+          const SizedBox(height: 12),
           FilledButton(
-            onPressed: () => b.install(),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.teal),
-            child: Text(b.state == BrainState.error ? 'Try again' : 'Install assistant'),
+            onPressed: () => err ? b.retry() : b.install(),
+            style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.teal, minimumSize: const Size(double.infinity, 46)),
+            child: Text(err ? 'Try again' : 'Install assistant'),
           ),
         ]);
       case BrainState.ready:
         body = const SizedBox.shrink();
     }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppTheme.line)),
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: const Border(top: BorderSide(color: AppTheme.line)),
+          boxShadow: AppTheme.softShadow,
+        ),
+        child: body,
       ),
-      child: body,
     );
   }
 }
