@@ -33,7 +33,7 @@ jobs:
             "lib": ["main.dart", "models.dart", "theme.dart", "widgets.dart"],
             "lib/data": ["cities.dart", "iata.dart"],
             "lib/chat": ["chat_models.dart", "account_actions.dart"],
-            "lib/ai": ["brain.dart", "agent.dart", "tools.dart", "voice.dart"],
+            "lib/ai": ["brain.dart", "agent.dart", "tools.dart", "voice.dart", "downloader.dart"],
             "lib/services": ["vault.dart", "crypto_service.dart", "account_service.dart",
                              "cloud_service.dart", "planner.dart", "message_composer.dart",
                              "live_api.dart", "estimator.dart", "resolver.dart",
